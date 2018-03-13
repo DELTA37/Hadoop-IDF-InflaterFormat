@@ -111,11 +111,13 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 			FSDataInputStream idxInputTMP = fs.open(idxPath);
 			idxInputTMP.seek(idxOffset);
 			LittleEndianDataInputStream idxInput = new LittleEndianDataInputStream(idxInputTMP);
-			for (int i = 0; i < idxLength; i++) {
-				long length = idxInput.readInt();
-				this.lengths.add(length);
-				max_length = Math.max(length, max_length);
-			}
+			try {
+				for (int i = 0; i < idxLength; i++) {
+					long length = idxInput.readInt();
+					this.lengths.add(length);
+					max_length = Math.max(length, max_length);
+				}
+			} catch(IOException e) {}
 
 			fs = pkzPath.getFileSystem(conf);
       this.finput = fs.open(pkzPath);
@@ -152,8 +154,6 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
       decompresser.end();
 
 			this.currentValue = new Text(new String(this.result_buf, 0, (int)result_len, "UTF-8"));
-			this.currentValue = new Text("Hi everyone");
-			//this.currentValue = new Text(new String(this.result_buf, 0, (int)result_len, "UTF-16"));
 
 			return true;
     }
@@ -175,8 +175,7 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 
     @Override
     public void close() throws IOException {
-			IOUtils.closeStream(this.finput);
-			//this.finput.close();
+			this.finput.close();
     }
 
   }
@@ -211,17 +210,20 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 			long idxLength = 0l;
 
 			boolean complete = false;
+
 			for (int i = 0; i < lengths.size(); i++) {
 				pkzLength += lengths.get(i);
 				idxLength += 4l;
 				complete = false;
 				if (pkzLength > bytesPerSplit) {
 					splits.add(new PkzFileSplit(pkzPath, pkzOffset, pkzLength, null, idxOffset, idxLength, docNumber));
-
+					
+					/*
   				System.out.println(String.format("idxOffset: %d", idxOffset));
 	  			System.out.println(String.format("idxLength: %d", idxLength));
 		  		System.out.println(String.format("pkzOffset: %d", pkzOffset));
 			  	System.out.println(String.format("pkzLength: %d", pkzLength));
+					*/
 
 					idxOffset += idxLength;
 					pkzOffset += pkzLength;
@@ -231,18 +233,23 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 				}
 				docNumber++;
 			}
+
 			if (!complete) {
 				splits.add(new PkzFileSplit(pkzPath, pkzOffset, pkzLength, null, idxOffset, idxLength, docNumber));
+
+				/*
 				System.out.println(String.format("idxOffset: %d", idxOffset));
 				System.out.println(String.format("idxLength: %d", idxLength));
 				System.out.println(String.format("pkzOffset: %d", pkzOffset));
 				System.out.println(String.format("pkzLength: %d", pkzLength));
+				*/
 
 				idxOffset += idxLength;
 				pkzOffset += pkzLength;
 				pkzLength = 0l;
 			  idxLength = 0l;
 			}
+
     }
 		return splits;
   }

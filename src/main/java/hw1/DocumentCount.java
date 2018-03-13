@@ -29,25 +29,18 @@ import hw1.InflaterInputFormat;
 public class DocumentCount extends Configured implements Tool {
 
   public static class TokenizerMapper extends Mapper<LongWritable, Text, Text, LongWritable> {
-
-    private static LongWritable one = new LongWritable(1);
+		private static final LongWritable one = new LongWritable(1);
 
 		@Override
     protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
-			/*
 			Set<String> allMatches = new HashSet<>();
-      Matcher m = Pattern.compile("\\p{L}+").matcher(value.toString().toLowerCase());
+      Matcher m = Pattern.compile("\\p{L}+").matcher(value.toString().toLowerCase().trim());
       while (m.find()) {
      		allMatches.add(m.group());
       }
-      for(String word: allMatches) {
-				System.out.println(word);
-      	context.write(new Text(word), one);
+      for (String word : allMatches) {
+      	context.write(new Text(word.trim()), one);
 			}
-			*/
-			context.write(new Text("George"), one);
-			context.write(new Text("Regina"), one);
-			context.write(new Text("Iam"), one);
 		}
   }
 
@@ -63,6 +56,9 @@ public class DocumentCount extends Configured implements Tool {
   }
 
   private Job getJobConf(String inputDir, String outputDir) throws Exception {
+		System.out.println(inputDir);
+		System.out.println(outputDir);
+
 		getConf().set(TextOutputFormat.SEPERATOR, "\t");
     Job job = Job.getInstance(getConf(), "document count");
 
@@ -70,14 +66,15 @@ public class DocumentCount extends Configured implements Tool {
 
     job.setMapperClass(TokenizerMapper.class);
     job.setReducerClass(DocCountReducer.class);
+		
+		job.setMapOutputKeyClass(Text.class);
+		job.setMapOutputValueClass(LongWritable.class);		
 
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(IntWritable.class);
 
-		job.setInputFormatClass(InflaterInputFormat.class);
-		job.setOutputFormatClass(TextOutputFormat.class);
-    FileInputFormat.addInputPath(job, new Path(inputDir));
-    FileOutputFormat.setOutputPath(job, new Path(outputDir));
+    InflaterInputFormat.addInputPath(job, new Path(inputDir));
+    TextOutputFormat.setOutputPath(job, new Path(outputDir));
 
 		return job;
   }
