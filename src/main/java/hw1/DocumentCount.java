@@ -34,12 +34,12 @@ public class DocumentCount extends Configured implements Tool {
 		@Override
     protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 			Set<String> allMatches = new HashSet<>();
-      Matcher m = Pattern.compile("\\p{L}+").matcher(value.toString().toLowerCase().trim());
+      Matcher m = Pattern.compile("\\p{L}+").matcher(value.toString().toLowerCase());
       while (m.find()) {
      		allMatches.add(m.group());
       }
       for (String word : allMatches) {
-      	context.write(new Text(word.trim()), one);
+      	context.write(new Text(word), one);
 			}
 		}
   }

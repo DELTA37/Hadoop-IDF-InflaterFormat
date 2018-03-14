@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.Charset
 
 import java.lang.Math.*;
 
@@ -124,7 +125,7 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 			this.finput.seek(this.pkzOffset);	
 
 			this.input_buf = new byte[(int)max_length];
-			this.result_buf = new byte[(int)result_buf_len];
+			this.result_buf = new byte[(int)result_buf_max_len];
 		}
 
     @Override
@@ -138,14 +139,16 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 
 			this.finput.readFully(this.input_buf, 0, (int)length);
 
-			this.currentKey = new LongWritable(this.pkzOffset + length);
+			this.currentKey = new LongWritable(this.pkzOffset);
+			this.pkzOffset += length;
 
 			Inflater decompresser = new Inflater();
       decompresser.setInput(this.input_buf, 0, (int)length);
       long result_len = 0;
       try {
-      	result_len = decompresser.inflate(this.result_buf);
-				if (result_len > result_buf_len) {
+      	result_len = decompresser.inflate(this.result_buf, 0, (int)result_buf_max_len);
+				if (result_len >= result_buf_max_len) {
+					// reallocation and triing again
 					throw new DataFormatException();
 				}
       } catch (DataFormatException e) {
@@ -153,7 +156,7 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
       }
       decompresser.end();
 
-			this.currentValue = new Text(new String(this.result_buf, 0, (int)result_len, "UTF-8"));
+			this.currentValue = new Text(new String(this.result_buf, 0, (int)result_len, Charset.forName("UTF-8")));
 
 			return true;
     }
@@ -262,11 +265,11 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
   }
 		
 
-	public static final String BYTES_PER_MAP = "mapreduce.input.bmp.bytes_per_map";	
+	public static final String BYTES_PER_MAP = "mapreduce.input.indexedgz.bytespermap";	
 	private static long numBytesPerSplit = 1600000;
 	private static LongWritable one = new LongWritable(1);
 
-	private static long result_buf_len = 10000l;
+	private static long result_buf_max_len = 1000000l;
 
  	public static long getNumBytesPerSplit(Configuration conf) {
 		return conf.getLong(BYTES_PER_MAP, numBytesPerSplit);
