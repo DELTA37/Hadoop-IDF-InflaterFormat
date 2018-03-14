@@ -7,3 +7,4 @@ results
 answer.txt
 nohup.out
 *.zip
+*.gz

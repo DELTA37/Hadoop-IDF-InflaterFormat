@@ -55,7 +55,6 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 			this.idxOffset = new Long(idxOffset);
 			this.idxLength = new Long(idxLength);
 			this.docNumber = new Long(docNumber);
-			System.out.println(this.idxLength);
 		} 
 		public Long getIdxOffset() {
 			return this.idxOffset;
