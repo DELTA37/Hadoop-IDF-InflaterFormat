@@ -33,6 +33,7 @@ public class DocumentCount extends Configured implements Tool {
 
 		@Override
     protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+      context.write(value, one);
 			Set<String> allMatches = new HashSet<>();
       Matcher m = Pattern.compile("\\p{L}+").matcher(value.toString().toLowerCase());
       while (m.find()) {
@@ -69,6 +70,9 @@ public class DocumentCount extends Configured implements Tool {
 		
 		job.setMapOutputKeyClass(Text.class);
 		job.setMapOutputValueClass(LongWritable.class);		
+		
+		job.setInputFormatClass(InflaterInputFormat.class);
+		job.setOutputFormatClass(TextOutputFormat.class);
 
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(IntWritable.class);

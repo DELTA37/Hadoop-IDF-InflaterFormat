@@ -6,3 +6,4 @@ build/
 results
 answer.txt
 nohup.out
+*.zip

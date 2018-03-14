@@ -17,11 +17,14 @@ import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.FileSplit;
 
+import java.io.DataInput;
+import java.io.DataOutput;
 import java.io.IOException;
+
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.nio.ByteOrder;
-import java.nio.charset.Charset
+import java.nio.charset.Charset;
 
 import java.lang.Math.*;
 
@@ -36,36 +39,50 @@ import com.google.common.io.LittleEndianDataInputStream;
 class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 
 	public static class PkzFileSplit extends FileSplit {
-		private long idxOffset;
-		private long idxLength;
-		private long docNumber;
+		private Long idxOffset;
+		private Long idxLength;
+		private Long docNumber;
 		
-		public PkzFileSplit() {
+		public PkzFileSplit() throws IOException {
 			super();
-			this.idxOffset = 0l;
-			this.idxLength = 0l;
-			this.docNumber = 0l;
+			idxOffset = new Long(-1);
+			idxLength = new Long(-1);
+			docNumber = new Long(-1);
 		}
 
-		public PkzFileSplit(Path file, long start, long length, String[] hosts) {
-			super(file, start, length, hosts);
-		}
-		
-		public PkzFileSplit(Path file, long start, long length, String[] hosts, long idxOffset, long idxLength, long docNumber) {
-			super(file, start, length, hosts);
-			this.idxOffset = idxOffset;
-			this.idxLength = idxLength;
-			this.docNumber = docNumber;
+		public PkzFileSplit(Path file, long start, long length, long idxOffset, long idxLength, long docNumber) {
+			super(file, start, length, new String[]{});
+			this.idxOffset = new Long(idxOffset);
+			this.idxLength = new Long(idxLength);
+			this.docNumber = new Long(docNumber);
+			System.out.println(this.idxLength);
 		} 
-		public long getIdxOffset() {
+		public Long getIdxOffset() {
 			return this.idxOffset;
 		}
-		public long getIdxLength() {
+		public Long getIdxLength() {
 			return this.idxLength;
 		}
-		public long getDocNumber() {
+		public Long getDocNumber() {
 			return this.docNumber;
 		}
+
+
+		 @Override
+    public void write(DataOutput out) throws IOException {
+    	super.write(out);
+     	out.writeLong(this.idxOffset);
+     	out.writeLong(this.idxLength);
+     	out.writeLong(this.docNumber);
+    }
+
+    @Override
+    public void readFields(DataInput in) throws IOException {
+      super.readFields(in);
+			this.idxOffset = new Long(in.readLong());
+			this.idxLength = new Long(in.readLong());
+			this.docNumber = new Long(in.readLong());
+    }
 	}
 
   public class InflaterReader extends RecordReader<LongWritable, Text> {
@@ -85,7 +102,7 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 
 		LongWritable currentKey;
 		Text currentValue;
-
+		
     @Override
     public void initialize(InputSplit split, TaskAttemptContext context) throws IOException {
     	Configuration conf = context.getConfiguration();
@@ -94,38 +111,40 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
       Path pkzPath = fsplit.getPath();
       Path idxPath = pkzPath.suffix(".idx");
 
-			long idxOffset = fsplit.getIdxOffset();
-			long idxLength = fsplit.getIdxLength();
+			long idxOffset = fsplit.getIdxOffset().longValue();
+			long idxLength = fsplit.getIdxLength().longValue();
 			this.pkzOffset = fsplit.getStart();
-
-			this.docNumber = fsplit.getDocNumber();
+			this.docNumber = fsplit.getDocNumber().longValue();
+			
+			if (idxLength < 0) {
+				throw new IOException("idxLength error");
+			}
 
 			this.start = 0;
-			this.pos = 0;
-			this.end = idxLength;
+			this.pos = this.start;
+			this.end = idxLength / 4l;
 			
-			long max_length = 0;	
-			this.lengths = new ArrayList<>();
+			long max_length = 0;
+			this.lengths = new ArrayList<Long>((int)this.end);
 
 			// read index from start to end
 			FileSystem fs = idxPath.getFileSystem(conf);
 			FSDataInputStream idxInputTMP = fs.open(idxPath);
 			idxInputTMP.seek(idxOffset);
 			LittleEndianDataInputStream idxInput = new LittleEndianDataInputStream(idxInputTMP);
-			try {
-				for (int i = 0; i < idxLength; i++) {
-					long length = idxInput.readInt();
-					this.lengths.add(length);
-					max_length = Math.max(length, max_length);
-				}
-			} catch(IOException e) {}
-
+			for (int i = 0; i < this.end; i++) {
+				long length = idxInput.readInt();
+				this.lengths.add(length);
+				max_length = Math.max(length, max_length);
+			}
 			fs = pkzPath.getFileSystem(conf);
       this.finput = fs.open(pkzPath);
 			this.finput.seek(this.pkzOffset);	
-
 			this.input_buf = new byte[(int)max_length];
 			this.result_buf = new byte[(int)result_buf_max_len];
+			
+			this.currentKey = new LongWritable(-1);
+			this.currentValue = new Text();
 		}
 
     @Override
@@ -135,7 +154,7 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 			}
 
 			long length = this.lengths.get((int)pos);
-			pos++;
+			pos += 1;
 
 			this.finput.readFully(this.input_buf, 0, (int)length);
 
@@ -145,19 +164,23 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 			Inflater decompresser = new Inflater();
       decompresser.setInput(this.input_buf, 0, (int)length);
       long result_len = 0;
-      try {
-      	result_len = decompresser.inflate(this.result_buf, 0, (int)result_buf_max_len);
-				if (result_len >= result_buf_max_len) {
-					// reallocation and triing again
-					throw new DataFormatException();
-				}
-      } catch (DataFormatException e) {
-        e.printStackTrace();
-      }
+			long read_len = 0;
+			do {
+      	try {
+					if (result_len == result_buf_max_len) {
+						byte[] oldbuf = this.result_buf;
+						this.result_buf = new byte[2 * (int)result_buf_max_len];
+						System.arraycopy(this.result_buf, 0, oldbuf, 0, (int)result_len);
+						result_buf_max_len *= 2;
+					}
+      		read_len = decompresser.inflate(this.result_buf, (int)result_len, (int)(result_buf_max_len - result_len));
+					result_len += read_len;
+      	} catch (DataFormatException e) {}
+			} while (read_len > 0);
       decompresser.end();
-
-			this.currentValue = new Text(new String(this.result_buf, 0, (int)result_len, Charset.forName("UTF-8")));
-
+			
+			//this.currentValue.set(this.result_buf, 0, (int)result_len);
+			this.currentValue = new Text(new String(this.result_buf, 0, (int)result_len, "UTF-8"));
 			return true;
     }
 
@@ -200,12 +223,12 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
       Configuration conf = context.getConfiguration();
 			FileSystem fs = idxPath.getFileSystem(conf);
 			LittleEndianDataInputStream idxInput = new LittleEndianDataInputStream(fs.open(idxPath));
-			List<Long> lengths = new ArrayList<>();
-			try {
-				while(true) {
-					lengths.add(new Long(idxInput.readInt()));
-				}
-			} catch (IOException e) {}
+
+			long size = fs.getFileStatus(idxPath).getLen() / 4l;
+			List<Long> lengths = new ArrayList<>((int)size);
+			for (int i = 0; i < size; i++) {
+				lengths.add(new Long(idxInput.readInt()));
+			}
 				
 			long pkzOffset = 0l;
 			long pkzLength = 0l;
@@ -219,8 +242,8 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 				idxLength += 4l;
 				complete = false;
 				if (pkzLength > bytesPerSplit) {
-					splits.add(new PkzFileSplit(pkzPath, pkzOffset, pkzLength, null, idxOffset, idxLength, docNumber));
-					
+					splits.add(new PkzFileSplit(pkzPath, pkzOffset, pkzLength, idxOffset, idxLength, docNumber));
+
 					/*
   				System.out.println(String.format("idxOffset: %d", idxOffset));
 	  			System.out.println(String.format("idxLength: %d", idxLength));
@@ -230,15 +253,15 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 
 					idxOffset += idxLength;
 					pkzOffset += pkzLength;
-					pkzLength = 0l;
 					idxLength = 0l;
+					pkzLength = 0l;
 					complete = true;
 				}
 				docNumber++;
 			}
 
 			if (!complete) {
-				splits.add(new PkzFileSplit(pkzPath, pkzOffset, pkzLength, null, idxOffset, idxLength, docNumber));
+				splits.add(new PkzFileSplit(pkzPath, pkzOffset, pkzLength, idxOffset, idxLength, docNumber));
 
 				/*
 				System.out.println(String.format("idxOffset: %d", idxOffset));
@@ -249,8 +272,8 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
 
 				idxOffset += idxLength;
 				pkzOffset += pkzLength;
-				pkzLength = 0l;
 			  idxLength = 0l;
+				pkzLength = 0l;
 			}
 
     }
@@ -260,18 +283,17 @@ class InflaterInputFormat extends FileInputFormat<LongWritable, Text> {
   @Override
   public RecordReader<LongWritable, Text> createRecordReader(InputSplit split, TaskAttemptContext context) throws IOException, InterruptedException {
 		InflaterReader reader = new InflaterReader();
-		reader.initialize(split, context);
+		reader.initialize((PkzFileSplit)split, context);
 		return reader;
   }
 		
 
-	public static final String BYTES_PER_MAP = "mapreduce.input.indexedgz.bytespermap";	
-	private static long numBytesPerSplit = 1600000;
-	private static LongWritable one = new LongWritable(1);
+	public 	static final String BYTES_PER_MAP = "mapreduce.input.indexedgz.bytespermap";	
+	private static long numBytesPerSplit = 16000000l;
 
-	private static long result_buf_max_len = 1000000l;
+	private static long result_buf_max_len = 10000l;
 
- 	public static long getNumBytesPerSplit(Configuration conf) {
+ 	public 	static long getNumBytesPerSplit(Configuration conf) {
 		return conf.getLong(BYTES_PER_MAP, numBytesPerSplit);
 	}
 }
